@@ -13,5 +13,5 @@ repository = "https://github.com/jdrouet/htmlparser.git"
 homepage = "https://github.com/jdrouet/htmlparser"
 
 [features]
-default = ["std"]
+default = []
 std = []

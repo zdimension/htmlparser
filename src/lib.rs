@@ -379,7 +379,7 @@ pub enum ElementEnd<'a> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ExternalId<'a> {
     System(StrSpan<'a>),
-    Public(StrSpan<'a>, StrSpan<'a>),
+    Public(StrSpan<'a>, Option<StrSpan<'a>>),
 }
 
 /// Representation of the [EntityDef](https://www.w3.org/TR/xml/#NT-EntityDef) value.
@@ -593,7 +593,10 @@ impl<'a> Tokenizer<'a> {
                     s.skip_spaces();
                     None
                 } else {
-                    Some(Err(Error::UnknownToken(s.gen_text_pos())))
+                    //Some(Err(Error::UnknownToken(s.gen_text_pos())))
+                    // zdimension: we want to allow root text nodes
+                    self.state = State::Elements;
+                    None
                 }
             }
             State::Elements => {
@@ -623,7 +626,8 @@ impl<'a> Tokenizer<'a> {
                                 self.depth -= 1;
                             }
 
-                            if self.depth == 0 && !self.fragment_parsing {
+                            // zdimension: we want to allow root text nodes
+                            if false && self.depth == 0 && !self.fragment_parsing {
                                 self.state = State::AfterElements;
                             } else {
                                 self.state = State::Elements;
@@ -649,7 +653,8 @@ impl<'a> Tokenizer<'a> {
                         self.depth += 1;
                     }
 
-                    if self.depth == 0 && !self.fragment_parsing {
+                    // zdimension: we want to allow root text nodes
+                    if false && self.depth == 0 && !self.fragment_parsing {
                         self.state = State::AfterElements;
                     } else {
                         self.state = State::Elements;
@@ -965,10 +970,15 @@ impl<'a> Tokenizer<'a> {
             let v = if id.as_str() == "SYSTEM" {
                 ExternalId::System(literal1)
             } else {
-                s.consume_spaces()?;
-                let quote = s.consume_quote()?;
-                let literal2 = s.consume_bytes(|_, c| c != quote);
-                s.consume_byte(quote)?;
+                let literal2 = if s.curr_byte()? == b' ' {
+                    s.consume_spaces()?;
+                    let quote = s.consume_quote()?;
+                    let literal2 = s.consume_bytes(|_, c| c != quote);
+                    s.consume_byte(quote)?;
+                    Some(literal2)
+                } else {
+                    None
+                };
 
                 ExternalId::Public(literal1, literal2)
             };
@@ -1167,11 +1177,21 @@ impl<'a> Tokenizer<'a> {
         let (prefix, local) = s.consume_qname()?;
 
         let value = if s.try_consume_eq() {
-            let quote = s.consume_quote()?;
-            let quote_c = quote as char;
-            let value = s.consume_chars(|_, c| c != quote_c)?;
-            s.consume_byte(quote)?;
-            Some(value)
+            match s.consume_quote() {
+                Ok(quote) => {
+                    let quote_c = quote as char;
+                    let value = s.consume_chars(|_, c| c != quote_c)?;
+                    s.consume_byte(quote)?;
+                    Some(value)
+                }
+                Err(e) => {
+                    if !matches!(e, StreamError::InvalidQuote(_, _)) {
+                        return Err(e);
+                    }
+                    let value = s.consume_chars(|_, c| !c.is_ascii_whitespace() && c != '>' && c != '/')?;
+                    Some(value)
+                }
+            }
         } else {
             None
         };
